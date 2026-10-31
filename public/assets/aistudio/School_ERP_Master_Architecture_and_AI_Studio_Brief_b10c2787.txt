@@ -1,0 +1,449 @@
+SCHOOL ERP
+Master Architecture, Data Engine Blueprint
+and AI Studio Implementation Brief
+A reusable Python data platform + modular school operations system + modern browser interface
+
+Purpose of this document
+This is the comprehensive project brief to upload to AI Studio as the persistent reference specification. It records the agreed scope, architecture, engine strategy, reusable components, school modules, operational safeguards, code organisation, phased roadmap and implementation rules. It is a walkthrough and design outline, not a rigid mapping of every feature to a specific source file.
+Prepared for planning and iterative implementation • 31 October 2026
+
+
+How to use this document
+Upload this document to AI Studio before asking it to generate code. Ask the model to read the entire document, summarise its understanding, identify unresolved decisions, and propose the next small implementation step. Do not ask it to build the entire ERP in one response.
+* Treat this document as the baseline specification. When a decision changes, update the relevant section and keep a short decision log.
+* Use the walkthrough to agree on behaviour and boundaries; do not force every concept into a predetermined number of snippets or files.
+* Request complete, runnable files for each agreed implementation increment, plus tests and exact integration instructions.
+* Keep generated code in a version-controlled project. Do not rely on chat history as the only copy of source code or configuration.
+* The first goal is a robust, GUI-independent data engine and its tests. The full ERP interface follows the architecture rather than owning database logic.
+Contents
+* 1. Vision and non-negotiable principles
+* 2. Overall architecture
+* 3. Independent database engines and generic driver API
+* 4. Engine API contract and example use
+* 5. Data types, schema and relationships
+* 6. Data management, backup, mirroring and migration
+* 7. Web UI and Master Control
+* 8. Shared reusable components
+* 9. Complete school ERP module inventory
+* 10. Security, privacy, audit and reliability
+* 11. Repository layout and code-size guidelines
+* 12. Testing and acceptance criteria
+* 13. Phased implementation roadmap
+* 14. AI Studio master prompt
+* 15. Decision log and open questions
+
+
+1. Vision and non-negotiable principles
+Build a comprehensive school ERP around a standalone, reusable Python data engine. The data engine must be useful outside the school ERP and must not depend on a GUI, school-specific rules, or a particular database vendor.
+* The first release stores structured text, numbers, dates, times, booleans and relationships. PDFs, images and other files are out of scope for ordinary database records; if introduced later, handle them through a separate file-management service using local file storage and database-held metadata/references.
+* The browser UI must not issue SQL directly. UI code calls application APIs; school services call the generic engine API; adapters call their own database drivers.
+* Each engine has its own implementation and driver calls. SQLite and PostgreSQL are separate adapters/engines behind a shared generic contract. A future cloud engine can implement the same contract or a documented capability subset.
+* The generic engine remains database-agnostic where practical, but must not pretend that every backend has identical features, types, locking, transaction isolation or replication behaviour.
+* Build generic functions once: create, lookup, update, delete, search, sort, filter, paginate, bulk operations, validation, transactions, import/export, migrations and health checks.
+* Keep reusable UI components separate from the data engine. The engine has no GUI dependency.
+* Design the complete system now, but implement it in small, tested increments.
+* Prioritise correctness, safety, recoverability and maintainability over compressed code or rushing to create many screens.
+2. Overall architecture
+LayerResponsibilityMust not doBrowser UI (JavaScript/HTML/CSS)Navigation, forms, grids, dashboards, user feedback and browser-side validation for usability.Connect directly to a database or contain database credentials.Backend API (Python)Authentication, request handling, authorisation, request validation and orchestration of application services.Trust browser-supplied permissions or accept arbitrary SQL from clients.School application servicesSchool workflows and business rules: admission, fee posting, timetable conflicts, marks approval, stock movement.Duplicate generic CRUD mechanics in every module.Generic data-engine APIStable operations for records, schemas, transactions, searches, validation hooks and backend capabilities.Contain school-specific rules or UI code.Database engine adaptersBackend-specific connection lifecycle, driver calls, SQL dialect differences, transactions and backend capability reporting.Leak driver-specific objects into ordinary application modules.Data management servicesBackup/restore, migrations, import/export, verification, replication/synchronisation orchestration.Treat a backup as a live replica or overwrite live data without explicit safeguards.StorageLocal SQLite database for suitable single-user/offline use; central PostgreSQL for shared multi-PC operation; future cloud backend.Assume a network-shared SQLite file is a robust multi-user server database.
+Recommended initial deployment
+Develop locally with SQLite if useful, while testing the same contract against PostgreSQL. For several PCs sharing live school data, use a central PostgreSQL server reached through a secured Python backend/API. The browser should communicate with the application server, not open direct database connections. A shared SQLite file on a network drive is not the recommended multi-user design.
+High-level request flow
+Browser UI (JavaScript)
+    -> HTTPS application API (Python)
+        -> school application service
+            -> generic data-engine API
+                -> selected adapter: SQLite / PostgreSQL / future cloud
+                    -> database
+The Master Control utility is a separate, restricted administrative program/workflow. It can invoke approved backend administration services for engine configuration, migrations, backup/restore, transfer and health checks. It must not become an unrestricted remote command shell.
+3. Independent database engines and generic driver API
+The project uses the word “engine” to mean an independently selectable backend implementation. Keep each engine's driver-specific calls inside its adapter. Above those adapters, expose one consistent generic API to the rest of the application.
+Terminology note
+SQL is a query language, not a specific database engine. The implementation should therefore distinguish the generic SQL-oriented adapter contract from concrete database backends such as SQLite and PostgreSQL. If “SQL engine” is used as a project label, document precisely which concrete backend it refers to so it does not become confused with the common API.
+3.1 Engine implementations
+Engine / adapterPurposeImplementation considerationsSQLite enginePortable local database, development, small single-user deployments or selected offline workflows.Use the Python sqlite3 driver; handle transactions, locking, schema differences and safe file paths. Do not assume it is a central multi-user server.PostgreSQL enginePrimary candidate for shared, concurrent multi-PC school operation.Use a maintained PostgreSQL Python driver (for example psycopg); connection pooling where appropriate; migrations; parameterised queries; role permissions; transaction and concurrency handling.Future cloud engineConnect to a hosted database or provider-specific service.Choose later based on hosting and API requirements. It may use PostgreSQL remotely or a provider API; do not assume every cloud service is a SQL database.Future other SQL backendOptional adapter for another SQL database if required.Implement the same generic contract and declare capability differences. Add only when a real use case exists.
+3.2 Generic adapter contract
+* connect(configuration), disconnect(), health_check() and capability_report().
+* begin/commit/rollback or a context-managed transaction API.
+* Execute safe internal operations using parameterised values and validated identifiers.
+* CRUD and query operations return predictable result objects, not raw driver cursor objects.
+* Map backend-specific exceptions into stable application error categories while retaining safe diagnostic context in logs.
+* Provide backend capability information for features that vary, such as returning inserted IDs, JSON support, full-text search, bulk loading and isolation levels.
+* Keep connection pooling and thread/process handling inside the relevant adapter or server layer.
+* Use migrations rather than relying on ad-hoc table creation scattered throughout the application.
+3.3 Engine selection and switching
+Engine selection should be driven by validated configuration, not scattered conditional logic in every module. A factory/registry creates the selected adapter. Switching an engine is an administrative migration workflow, not simply changing a dropdown and immediately pointing the live application at a different database.
+1. Read and validate the source and destination engine configurations.
+2. Check connectivity, capabilities, schema versions and available storage.
+3. Take a recoverable source backup and record a migration job.
+4. Create/apply the target schema and transfer data in a controlled sequence.
+5. Verify row counts, key relationships, constraints and important totals.
+6. Present a clear review/approval step before changing the active connection.
+7. Record the result and retain a documented rollback path.
+8. Do not delete or overwrite the source automatically after a successful transfer.
+4. Generic engine API contract and example use
+The exact public names will be agreed in the walkthrough. The example below communicates the desired style, not a frozen implementation.
+engine = create_engine(config)
+
+students = engine.search(
+    "students",
+    filters={"class_id": 8, "status": "active"},
+    limit=100,
+    offset=0,
+)
+
+student = engine.get("students", record_id=1024)
+
+result = engine.insert(
+    "students",
+    {"name": "Example Student", "class_id": 8},
+)
+
+engine.update(
+    "students",
+    record_id=1024,
+    changes={"status": "inactive"},
+)
+4.1 Core operations to specify
+Operation groupRequired behavioursCreate/read/update/deleteCreate records; fetch by primary key; update selected fields; controlled delete; return stable result/error objects.Lookup and searchLookup by ID or configured alternate key; exact and partial search where appropriate; filters, sort order, pagination and total counts.Bulk operationsBulk insert/update, preview and validation, row-level error results, duplicate policy, transaction boundaries and explicit confirmation for destructive actions.Schema/metadataDiscover approved fields, field types, labels, nullability, defaults, constraints and references from trusted definitions.TransactionsAtomic multi-step changes for financial postings, stock movements, marks publication and other workflows that must succeed or fail together.ValidationType conversion, required fields, allowed values, uniqueness, relationships and business-rule validation at the appropriate layer.AdministrationHealth checks, migrations, backup/restore integration, data transfer and capability reporting.
+4.2 Security rule for generic APIs
+Never concatenate user-supplied values into SQL. Parameterise data values. Table/column names cannot generally be parameterised like values, so accept only identifiers from trusted schema metadata or a strict allow-list. Do not expose an unrestricted execute_sql endpoint to the browser or ordinary modules.
+4.3 Error contract
+Define stable errors such as ValidationError, NotFoundError, DuplicateRecordError, PermissionDeniedError, ConflictError, ConnectionUnavailableError, MigrationError and DataIntegrityError. User-facing messages should be understandable; technical logs should contain useful diagnostic details without exposing passwords, secrets or sensitive personal data.
+5. Data types, schema and relationships
+The engine must not store every field as TEXT merely because the initial interface is text-and-numbers oriented. Define a portable set of types and map them carefully to each backend.
+Portable logical typeExamplesNotesTextNames, notes, codes, addressesSet sensible length/format rules where needed; do not use text for everything.IntegerStudent counts, quantities in whole unitsUse appropriate range and validation.Decimal / moneyFee amounts, prices, salary amountsUse exact decimal/numeric handling for money; avoid binary floating point for financial totals.BooleanActive status, approved flagMap backend differences consistently.DateBirth date, admission date, due dateDo not store as arbitrary formatted text.Time / datetimePeriod start, payment timestampDefine timezone rules for timestamps and local school time.Enumerated/referenceStatus, category, grade scalePrefer configurable reference tables when values need maintenance.Foreign key/referenceStudent-to-class, fee-to-studentEnforce referential integrity and define deletion behaviour.File reference (future)A local file path/ID plus metadataManaged by a separate file service; no binary file blobs in ordinary records by default.
+5.1 Shared foundational entities
+* School/campus and configuration (even if the first deployment is one school).
+* Academic year, term/semester, calendar and working days.
+* Person/identity concepts where suitable, with distinct student, guardian and employee roles.
+* Student, guardian relationship, admission/application, enrolment, class, section, subject and academic history.
+* Employee, department, designation, assignment, attendance and leave.
+* User account, role, permission, scope and audit event.
+* Inventory item, unit, vendor, purchase order, stock movement and location.
+* Fee plan, fee charge, payment, allocation, receipt, adjustment and refund.
+* Payroll period, salary component, payroll run, payslip and payment status.
+5.2 Data integrity and lifecycle
+Use stable internal identifiers; do not rely on a person's name as a key. Define uniqueness rules for admission numbers, employee IDs, receipts, inventory codes and other identifiers. Use foreign keys and transactions. Decide when records may be archived, deactivated or legally deleted. Financial and audit records often need controlled reversals rather than silent deletion.
+6. Data management, backup, mirroring and migration
+CapabilityMeaning and expected designBackupA recoverable point-in-time copy. Include database-consistent backup, metadata/configuration needed for recovery, retention policy and restore tests.RestoreRestore to a controlled target, verify integrity and make the operator confirm before replacing live data. Prefer test restores before production cutover.ExportCSV/XLSX for selected records and reports; native database backup for complete database recovery. Include encoding, null handling, date/decimal rules and importable identifiers.MigrationVersioned schema changes with pre-checks, logs, tested forward steps and documented recovery/rollback strategy.Mirror/replicaA maintained second database copy, typically for availability or reporting. Define direction, lag, monitoring and failover policy.One-way copyA controlled transfer from source to destination; the destination is not automatically allowed to write back.Two-way synchronisationIndependent changes merge between copies. Requires change tracking, conflict policy, idempotency, retry handling and duplicate prevention.Engine migrationCopy schema and data between adapters, map types, verify row counts/relationships/business totals and explicitly switch active configuration.Integrity checkCheck constraints, relationships, required records, duplicate identifiers, row counts and selected domain-specific totals.
+Important distinction
+Backup, mirroring/replication and two-way synchronisation are different features. The first release should prioritise reliable backups, restore testing, migrations and controlled one-way engine transfer. Do not promise seamless offline multi-device synchronisation until conflict handling has been designed and tested.
+6.1 Master Control administration jobs
+* Inspect active engine, server reachability, schema version and application health.
+* Create and verify backups; list backup metadata; run a controlled restore workflow.
+* Configure a target engine, test connection and show capability differences.
+* Run schema migrations with preflight checks and clear logs.
+* Transfer data between source and destination engines with preview, progress, verification and approval.
+* Configure a replica/mirror only after the replication method and direction are explicitly defined.
+* Export/import selected datasets with mapping and dry-run validation.
+* Display maintenance mode, active jobs, errors, timestamps and audit history.
+* Provide separate, versioned installation/dependency scripts and deployment instructions; do not silently install packages or change the operating system from a normal browser screen.
+7. Web UI and Master Control
+7.1 Main ERP interface
+Use a modern browser-based interface built with JavaScript, HTML and CSS rather than Tkinter. Choose a maintainable frontend framework during the implementation walkthrough; keep it independent from the Python backend. Target supported modern browsers on Windows PCs without assuming one specific Windows version. Browser compatibility should be documented and tested.
+* Use a Python backend API (for example, a suitable web framework selected during the walkthrough) to authenticate requests and invoke services.
+* The browser communicates with the backend over HTTPS; it never holds database passwords or connects directly to PostgreSQL/SQLite.
+* Use a consistent navigation shell, searchable module navigation, breadcrumbs, global notifications and role-aware menus.
+* Build forms, dropdowns, tables, filters and bulk workflows from reusable components and documented metadata where practical.
+* Support keyboard-friendly data entry, clear loading/error/empty states, accessible labels and responsive layouts.
+* Avoid tying core business rules to the browser; validate again on the server.
+7.2 Master Control
+Master Control is a separate administrative program or restricted administrative application, launched from Settings after authorised access. Its exact deployment form should be decided in the walkthrough: it may be a separate local administration utility or a separately protected administrative web area backed by privileged server-side services. The critical requirement is separation of privilege and code, not a particular window style.
+* Require authenticated administrative access and, for high-impact operations, re-authentication or a second confirmation.
+* Use role-based permissions and least privilege. A password prompt alone is not a complete security model.
+* Never store a plaintext master password in source code or browser JavaScript. Use the selected authentication system and secure password hashing for local credentials where applicable.
+* Expose only allow-listed operations. Do not accept arbitrary shell commands, arbitrary SQL or arbitrary file paths from UI input.
+* Show the source engine, target engine, backup status, estimated impact, preflight results and required confirmations before destructive or disruptive actions.
+* Record who initiated each operation, when, source/target, outcome and safe diagnostic details.
+* Use a maintenance/locking strategy for operations that require exclusive access. Do not switch a live connection while jobs are still writing without a defined cutover process.
+* Separate package installation scripts, database setup scripts, migrations, backup scripts and restore scripts. Document the exact commands and privileges each requires.
+* Provide clear progress, cancellation rules, error recovery and a post-operation verification report.
+7.3 Separate setup and installation deliverables
+DeliverablePurposeBackend environment setupCreate a virtual environment and install pinned Python dependencies from a reviewed requirements/lock file.Frontend setup/buildInstall JavaScript dependencies and build the browser assets using a reproducible lock file.Database bootstrapCreate/configure the chosen database and least-privilege application roles; do not hardcode secrets.Migration runnerApply versioned schema changes and report the current schema version.Backup/restore utilityRun documented, logged backup and restore operations with verification.Engine transfer utilityMove data between supported engines with dry-run, verification and approval.Deployment/run instructionsDocument local development, central server deployment, environment variables, TLS/network configuration and recovery.
+8. Shared reusable components
+The components below should be specified once and reused throughout the ERP. They are shared building blocks, not independent versions written in each module.
+8.1 Spreadsheet-style data grid
+* Configurable columns and widths, sortable headings, filter row/panel, pagination and total count.
+* Row selection, bulk actions, column visibility and sensible keyboard navigation.
+* Read-only by default where changes are high-risk; editable cells only when the module explicitly permits them.
+* Inline validation, clear unsaved-change state, concurrency/conflict feedback and permission-aware controls.
+* Large datasets must be paginated or queried incrementally; do not load the entire school database into the browser.
+8.2 Smart dropdown and autocomplete
+* Search existing items by label/code and show enough context to disambiguate similar names.
+* Use stable record IDs behind displayed labels.
+* Allow configured dependent fields (for example, selecting a vendor can populate vendor details) without embedding school-specific rules in the generic widget.
+* Offer a permission-controlled “create new” path only when appropriate; avoid accidental duplicate categories/items.
+* Support server-side searching for large lists and handle empty/no-match/loading/error states.
+8.3 Bulk import/export
+* CSV and XLSX support through a shared import/export service.
+* Preview rows, map source columns to target fields, identify unknown columns and configure whether the first row contains headers.
+* Convert and validate field types; check required fields, foreign keys, duplicate identifiers and permissions.
+* Offer dry-run validation and row-by-row errors before committing.
+* Use controlled transaction batches, clear partial-failure policy, idempotency/duplicate policy and a downloadable error report.
+* Never silently truncate or misalign columns; preserve leading zeros in identifiers where the schema defines them as text.
+* Exports must respect the user's permissions and must not expose restricted data by default.
+8.4 Forms, reporting and operational utilities
+* Dynamic forms: text, numeric, date/time, dropdown, autocomplete, references, required rules and conditional visibility.
+* Common validators: required, range, length, date order, allowed values, uniqueness and cross-field rules.
+* Reporting widgets: summary cards, tables, date filters, grouped totals, charts and saved report definitions.
+* Common confirmations, toast/status messages, error summaries, approval state, activity history and audit views.
+* Reusable reference-data maintenance for categories, units, statuses, terms, grade scales and other configurable lists.
+* Reusable printable/exportable reports with consistent date, decimal, null and page formatting.
+8.5 Inventory suggestion behaviour example
+When a storekeeper enters a daily stock receipt, typing “tom…” should suggest existing items such as Tomato. Selecting the item fills the stable item ID, default unit and relevant catalogue details. The user then enters the date, quantity, unit price, supplier and transaction type. A new item is created in the catalogue only through a separate permission-controlled flow. Stock changes should be recorded as movements; do not merely overwrite a single quantity field and lose the history.
+9. Complete school ERP module inventory
+The following scope is intentionally broad. Each module will later receive its own workflow walkthrough, field definitions, permissions, reports, edge cases and acceptance tests. This list is not a requirement to implement every module in the first release.
+A. Admissions and student records
+* Enquiries, prospective students, follow-ups and application tracking.
+* Application forms, admission decisions, admission numbers and student profiles.
+* Guardian details, sibling links, emergency contacts and authorised pickup contacts.
+* Previous school, transfer/leaving records, student ID, class/section/house assignment.
+* Academic-year enrolment, promotion, detention, withdrawal, re-admission and alumni.
+B. Academics and curriculum
+* Academic years, terms/semesters, classes, sections, subjects and subject combinations.
+* Syllabus, chapters, learning objectives, completion tracking and lesson plans.
+* Teacher-subject allocation, rooms/labs, homework, assignments and projects.
+* Remedial/enrichment classes, progress interventions and academic history.
+C. Attendance and leave
+* Student daily and period-wise attendance; teacher/staff attendance.
+* Late arrival, early departure, absence reasons, leave requests, approvals and balances.
+* Working days, holidays, monthly summaries and attendance percentage.
+* Corrections with audit history, absence follow-ups, parent notifications and substitutions.
+D. Timetable and period management
+* Period definitions/durations, breaks, working days and rotating timetables.
+* Class, section, subject and teacher timetables; room, lab, library and sports facility bookings.
+* Double periods, practicals, teacher availability/workload and conflict detection.
+* Substitutions, timetable changes, assemblies, events, exams and special schedules.
+E. Examinations, marks and evaluation
+* Exam cycles/schedules, maximum marks, weightages and configurable assessment types.
+* Internal assessments, practicals, projects, oral exams and bulk marks import.
+* Absent/exempt/withheld/not-applicable statuses; grade scales and pass criteria.
+* Totals, weighted scores, percentages, grades, report cards and consolidated mark sheets.
+* Moderation, approval/publication, re-evaluation, supplementary exams and teacher remarks.
+F. Fees and student finance
+* Fee heads, class-wise fee plans, admission/tuition/exam/transport/activity fees.
+* Instalments, due dates, concessions, scholarships, waivers and recurring charges.
+* Receipts, allocations, outstanding balances, partial/advance payments and credit adjustments.
+* Late fees, reminders, refunds, cancellations, reversals, cashier closing and reconciliation.
+G. Human resources and staff
+* Teachers, administrators, support staff, temporary workers and employee profiles/IDs.
+* Qualifications, experience, contracts, departments, designations and reporting managers.
+* Joining, probation, confirmation, transfer, exit, work schedules and leave.
+* Teacher workload, training, appraisal, performance review and substitute availability.
+* Metadata/references for staff documents managed through separate local file management.
+H. Payroll and staff finance
+* Salary structures, basic pay, allowances, overtime, bonuses and reimbursements.
+* Configurable deductions, attendance/leave adjustments, monthly payroll and approvals.
+* Payslips, payroll history, payment status, loans, salary advances and repayment.
+* Tax/statutory configuration appropriate to jurisdiction; audit and accounting exports.
+I. Inventory, purchasing and consumables
+* Reusable item catalogue, categories, units, vendors and locations.
+* Daily stock-in/out, vegetables, grains, milk, stationery, cleaning and lab supplies.
+* Autocomplete for previously entered items; unit conversions and default values.
+* Quotations, purchase orders, goods received, batch/expiry/minimum stock where applicable.
+* Department-wise stores, consumption, wastage, spoilage, transfers, stock counts and discrepancies.
+* Reorder suggestions, purchase planning, stock valuation and date/item movement histories.
+J. Canteen, kitchen and meal management
+* Daily menus, meal plans, recipe/ingredient requirements and planned servings.
+* Student/staff meal counts, subscriptions and special meal arrangements.
+* Kitchen issue/return registers, wastage, cost-per-meal estimates and stock forecasting.
+K. Transport and vehicle management
+* Vehicles, registration, seating capacity, routes, stops, pickup/drop-off times.
+* Student assignments and transport fees; drivers, attendants, licences and availability.
+* Maintenance, servicing, repair costs, fuel logs, insurance, permits and reminders.
+* Route changes, breakdowns, substitute vehicles, transport attendance and incident logs.
+L. Library management
+* Book catalogue, accession numbers, ISBN, author, publisher, edition and shelf location.
+* Physical copies, borrower eligibility, issue/return/renewal/reservation and due dates.
+* Overdue tracking, configurable fines, lost/damaged/written-off items and stock verification.
+* Acquisition requests, reading history and circulation reports.
+M. Assets, facilities and maintenance
+* Furniture, computers, projectors, equipment and school property register.
+* Asset tags, serials, purchase date, location and assignment to staff/class/department.
+* Repairs, scheduled maintenance, complaints, work orders and contractor records.
+* Depreciation configuration, disposal, room use and facility booking.
+N. Accounting and budgeting
+* Income/expense categories, chart of accounts, general ledger and journal entries.
+* Cash, bank and petty-cash registers; vendor invoices and payments.
+* Fee and payroll accounting entries; department/annual budgets and variance reports.
+* Receivables/payables, reconciliation, audit reports, financial-year closing.
+O. Student welfare, health and safety
+* Restricted health/emergency records, first-aid visits and incident logs.
+* Essential care instructions where appropriate, counselling appointments and authorised notes.
+* Safeguarding referrals with tightly restricted access, safety drills and inspections.
+* Support plans and authorised follow-up records; sensitive information excluded from broad search/export.
+P. Parent communication and school events
+* Guardian directory, notices, circulars, parent-teacher meetings and appointments.
+* Complaints, suggestions, requests, permissions/consents and follow-up tracking.
+* Events, competitions, trips, extracurricular activities, clubs and participation.
+* Communication history and optional email/SMS/messaging integrations later.
+Q. Administration and compliance
+* Visitor register, entry/exit logs, incoming/outgoing correspondence.
+* Certificate/document issuance registers, transfer and leaving workflows.
+* Policies, approvals, administrative orders, inspection/compliance calendars.
+* Meeting minutes, action items, school calendar and configurable retention rules.
+R. IT, users and permissions
+* User accounts, staff identities, roles and account status.
+* Read/create/update/delete/approve/export permissions, class/department scopes.
+* Sessions, password recovery, audit logs, application settings and reference data.
+* Optional multi-campus/multi-school access boundaries.
+S. Dashboards, reports and analytics
+* Admissions/enrolment, attendance, academic trends, fee collections and outstanding balances.
+* Staff attendance/payroll, purchases, stock consumption and low-stock alerts.
+* Budget/expenditure, class/subject/exam reports and custom filters.
+* Saved searches, date comparisons, configurable cards, tables and spreadsheet-friendly exports.
+10. Security, privacy, audit and reliability
+* Authentication and server-side authorisation are mandatory. A hidden button or client-side route is not an access-control boundary.
+* Use least-privilege database roles; separate application access from database administration. Never ship root/superuser credentials in source code.
+* Store secrets in environment-specific secret configuration or a suitable secret manager; do not commit .env files or credentials to source control.
+* Use HTTPS/TLS for browser-to-server traffic and secure database transport where supported. Restrict database ports to authorised hosts.
+* Apply role and scope permissions to records, operations, reports, imports and exports. A teacher may have class/subject-limited access; a cashier should not automatically see confidential welfare notes.
+* Audit high-impact actions: financial postings/reversals, marks changes/publication, permission changes, bulk imports/deletes, engine switching, backups/restores and data transfers.
+* Audit records should capture actor, timestamp, operation, target and outcome. Avoid logging passwords, tokens or unnecessary sensitive content.
+* Use transactions for workflows that update related tables or money/stock balances. Define idempotency for retries of payment/import/transfer jobs.
+* Protect against concurrent-edit conflicts and stale updates; use version checks or other explicit concurrency controls where appropriate.
+* Test restore procedures, not merely backup creation. Monitor disk space, failed jobs, database connectivity and backup age.
+* Set retention, archival and deletion rules consistent with applicable law and school policy. Restrict sensitive health, welfare and safeguarding records.
+* Do not treat local browser storage as a secure store for sensitive data or long-lived privileged credentials.
+11. Repository layout and code-size guidelines
+A possible layout is shown below. It is an outline, not a strict file-by-file mapping. Adjust it as the design becomes concrete, while preserving separation of concerns.
+school_erp/
+  backend/
+    api/                 # HTTP routes, request/response schemas
+    application/         # school workflows and service orchestration
+    core_engine/         # generic API, errors, config, validation, transactions
+    adapters/
+      sqlite/            # SQLite driver-specific implementation
+      postgresql/        # PostgreSQL driver-specific implementation
+      cloud/             # future provider adapter(s)
+    data_management/     # backups, restore, migration, transfer, sync
+    modules/
+      students/         # models/schema, repository, service, policies
+      admissions/
+      academics/
+      finance/
+      hr_payroll/
+      inventory/
+      ...
+  frontend/
+    app/                 # navigation and page composition
+    components/          # grid, form, autocomplete, import, reports
+    modules/             # module-specific screens
+  master_control/        # restricted admin UI/client and job workflows
+  scripts/               # setup, migration, backup/restore entry points
+  tests/                 # unit, adapter, integration and end-to-end tests
+  docs/                  # architecture, operations and decisions
+  requirements/          # Python dependency/lock specifications
+  pyproject.toml
+  README.md
+11.1 Code-size and modularity targets
+* Aim for fewer than 500 lines in ordinary source files. Split files when they acquire multiple responsibilities, even if they are below the limit.
+* Larger logical sections may be around 1,000–1,500 lines in total, but should be decomposed into smaller modules. Do not create a single 1,500-line student.py.
+* A typical module may separate schema/model definitions, repository operations, service/business rules and UI/screens. This is guidance, not a forced four-file template.
+* Keep shared components generic and document how a new module registers its fields, permissions, filters and actions.
+* Keep app startup thin. Avoid opening database connections or executing migrations as an uncontrolled side effect of importing UI modules.
+* Each file should have a clear purpose, explicit imports and documented public interfaces. Avoid circular imports and hidden global connections.
+11.2 Installation and dependency discipline
+Provide separate, reproducible installation instructions and scripts for the Python backend, frontend build, database driver dependencies and optional administration utilities. Pin or lock dependencies, document supported Python/Node/browser versions, and separate development dependencies from production dependencies. Never make the normal ERP startup silently install packages or alter database schema without an explicit deployment/migration step.
+12. Testing and acceptance criteria
+12.1 Engine tests
+* Run the same core contract test suite against SQLite and PostgreSQL adapters where the capability is shared.
+* Test insert, lookup, update, delete, filtering, sorting, pagination, duplicate handling and type conversion.
+* Test parameterisation and identifier allow-listing; verify that malformed input cannot change query structure.
+* Test transaction rollback, constraint errors, connection failure and concurrent-update behaviour.
+* Test migration from a clean database and upgrade from the previous schema version.
+* Test bulk import preview, row-level errors, duplicate policies, transaction behaviour and repeat/retry safety.
+* Test backup creation, restore into a test target, integrity checks and migration between engines.
+12.2 School workflow tests
+* A student cannot be assigned to a nonexistent class or invalid academic year.
+* A timetable change detects conflicts for the same teacher, room or class.
+* A fee payment and its allocations post atomically; reversals are traceable.
+* Marks cannot be published without the required approvals and configured rules.
+* Stock movements preserve history and prevent invalid negative stock where policy forbids it.
+* A bulk import reports errors before commit and does not silently corrupt row-to-column mappings.
+* Users cannot access records, reports, exports or Master Control operations outside their permissions.
+12.3 Delivery acceptance for each code increment
+* List the exact files added or changed.
+* Provide complete code for every changed file, not fragments that omit required context.
+* Explain dependencies, environment variables, commands and expected output.
+* Include automated tests and how to run them.
+* State what is implemented, what is deliberately deferred and any known limitations.
+* Confirm that existing public interfaces and earlier modules still work, or document and test any breaking change.
+* Do not claim success for commands or tests that were not actually run.
+13. Phased implementation roadmap
+PhaseScopeExit criteria0. Walkthrough and decisionsConfirm deployment, API boundaries, engine contract, type system, security model and module priorities.Reviewed architecture, data model outline, decisions and acceptance criteria.1. Engine foundationGeneric API, SQLite/PostgreSQL adapters, config, errors, CRUD/search, transactions, migrations and tests.Shared contract tests pass; no UI dependency; sample non-school dataset works.2. Data managementBackup/restore, integrity verification, CSV/XLSX service, controlled engine transfer and logs.Restore and transfer verified against test databases; failures are safe and visible.3. Backend and frontend shellPython application API, authentication/permissions, JavaScript web shell, navigation and reusable components.Browser uses API only; no direct database calls or secrets in frontend.4. Core school setupSchool settings, academic years, classes, sections, students, guardians, admissions and staff.Core records, relationships, permissions and imports tested.5. Academics and financeAttendance, timetable, examinations/marks, fees, payroll and accounting foundations.Critical workflows are transactional, auditable and validated.6. Operations modulesInventory, purchasing, kitchen, transport, library, assets, maintenance and communications.Shared components reused; stock/asset histories and reporting tested.7. Master Control and deploymentRestricted admin workflows, setup tools, engine migration, backup/restore, operational monitoring.Admin actions are permission-checked, audited, recoverable and documented.8. Hardening and optional cloudSecurity review, load/concurrency tests, recovery drills and cloud adapter if selected.Deployment guide and recovery procedures validated; capability differences documented.
+14. AI Studio master prompt
+Copy the following prompt into AI Studio along with this document. The document is the full specification; this prompt tells the model how to work with it.
+PROJECT: Modular School ERP and Reusable Python Data Engine
+
+Read the complete uploaded document titled “School ERP — Master Architecture, Data Engine Blueprint and AI Studio Implementation Brief” before proposing code. Treat it as the baseline requirements document.
+
+PRIMARY OBJECTIVE
+Design a comprehensive school ERP around a GUI-independent, reusable Python data engine. The main interface will be a modern JavaScript-based browser UI backed by a Python API. The engine must also be reusable in unrelated applications.
+
+ARCHITECTURAL RULES
+1. Separate the browser UI, backend API, school application services, generic engine API, backend-specific database adapters, data-management services and Master Control.
+2. The UI must never issue SQL or connect directly to a database. UI and school modules use documented APIs/services.
+3. Implement independent SQLite and PostgreSQL adapters, each with its own driver-specific calls, behind a shared generic driver/engine contract. Keep the contract extensible for future cloud engines and explicitly report backend capability differences.
+4. Remember that SQL is a language, not a concrete database. Use precise names for the generic contract and each concrete adapter.
+5. Keep school business rules out of the generic engine. Keep GUI code out of the engine.
+6. Use parameterised queries, validated schema identifiers, least-privilege access, secure configuration, consistent errors, transactions, migrations and automated tests.
+7. Use a central PostgreSQL service for multi-PC shared live data unless a different deployment is explicitly selected. The browser must call the secured backend API; it must not connect to the database directly.
+8. Keep ordinary source files below about 500 lines where practical. Split larger responsibilities into smaller files; larger logical sections may total 1,000–1,500 lines but must not become monolithic files. This is a design target, not a reason to fragment code artificially.
+9. Master Control must be separate and restricted, accessed from Settings by authorised users. It should provide approved workflows for dependency/setup checks, engine configuration, health checks, backup/restore, migrations, engine transfer and any explicitly designed mirroring. Do not expose arbitrary SQL or shell execution. Password prompts alone are not sufficient security.
+10. Keep installation/setup scripts, migration tools, backup/restore tools and engine-transfer tools as distinct, documented deliverables. Never silently install dependencies or change a production database at normal app startup.
+11. The initial data model covers typed text, numbers, dates, times, booleans and relationships. Future file support must use a separate file-management service and local file handling, with database metadata/references rather than ordinary binary fields.
+12. Implement reusable components once: spreadsheet-style grid, searchable dropdown/autocomplete, dynamic forms, CSV/XLSX import/export, dry-run validation, row-level errors, reports, dashboard widgets, audit trail, approvals and common error handling.
+13. Plan all modules A–S and capabilities listed in the uploaded document, including admissions/students, academics, attendance, timetable/periods, examinations/marks, fees, HR, payroll, inventory/purchasing, kitchen, transport, library, assets/facilities, accounting/budgeting, welfare/safety, communication/events, administration/compliance, users/permissions and dashboards/reports.
+14. Distinguish backups, replicas/mirrors, one-way transfers and two-way synchronisation. Do not promise safe two-way sync without conflict rules and tests.
+15. Include security, privacy, audit logging, restore verification, concurrent access and role/scope permissions in the design.
+
+WORKING METHOD
+- Do not build the entire ERP in one response.
+- First produce a concise but complete walkthrough: architecture, engine API contract, database type mapping, foundational entities/relationships, module map, Master Control boundaries, testing strategy, implementation phases and unresolved decisions.
+- Identify any ambiguity and propose a default with trade-offs rather than silently guessing.
+- Do not force the walkthrough into a rigid file/snippet map. File organisation should follow responsibilities.
+- After the walkthrough is approved, implement one small, testable increment at a time.
+- For each increment, state scope, exact file paths, public interfaces, dependencies, complete source code, tests, commands to run, acceptance criteria and known limitations.
+- Review existing project files before editing them. Preserve existing interfaces unless a change is necessary; explain and test breaking changes.
+- Do not provide partial snippets while claiming they are complete. Do not claim tests or commands passed unless they were run.
+- Keep a short decision log and update the specification when decisions change.
+- Begin now with the walkthrough and unresolved decisions only. Do not generate implementation code yet.
+15. Decision log and open questions
+Confirmed by the project owner:
+* Use a modern browser-based web UI with JavaScript rather than Tkinter.
+* Keep the data engine independent of the ERP and any GUI.
+* Keep database operations behind reusable generic APIs rather than writing SQL in the UI or each school module.
+* Have separate database engines/adapters, including SQLite and PostgreSQL, with their own driver calls behind a generic API; preserve the option of future cloud engines.
+* Build a separate Master Control program/workflow launched from Settings with authorised access for installation/health checks, backup/restore, mirroring/transfer, migrations and engine switching.
+* Keep modules modular, ordinary files ideally under 500 lines, and use the walkthrough before AI Studio implementation.
+* Include all A–S school modules and reusable components from this document.
+Items to decide during the walkthrough
+* Which frontend framework and Python web framework to use, based on maintainability and the team's familiarity.
+* Whether the first operational deployment is one school on a local network, a hosted server, or both; how many PCs and expected concurrent users.
+* Whether SQLite is for development/local use only or also for a defined offline workflow.
+* Whether the first release must support multiple campuses/schools or only one school with an upgrade path.
+* How authentication will work (for example, school-managed accounts, external identity provider, or another approach) and whether MFA is needed for administrators.
+* The backup location, retention policy, restore testing schedule and off-site copy strategy.
+* The precise meaning of “mirroring” in the first release: standby replica, one-way copy, or two-way synchronisation.
+* Which school rules, fee structures, grading rules and payroll/statutory requirements must be configurable for the intended jurisdiction.
+* Which modules are in the first minimum viable release and which can wait until later phases.
+Recommended next instruction to AI Studio
+“Read the full specification. First return the walkthrough, architecture diagram in text form, engine API proposal, foundational data model, module dependency map, security boundaries, implementation phases and open decisions. Do not generate code until I review that plan.”
+Appendix: implementation quality checklist
+* The engine imports and runs without importing any UI framework.
+* SQLite and PostgreSQL adapters implement the same shared contract tests for common capabilities.
+* Driver-specific objects and SQL dialect details do not leak into school modules.
+* No hardcoded credentials, database superuser passwords or privileged browser secrets.
+* All schema changes are versioned migrations; startup does not silently mutate production schema.
+* Imports support preview, validation, duplicate handling, row-level errors and safe commit semantics.
+* Backups can be restored and verified in a separate test environment.
+* Engine transfers compare schema, record counts, key relationships and selected business totals.
+* Master Control operations are authenticated, authorised, audited and guarded by preflight/confirmation steps.
+* Sensitive fields are excluded from general-purpose search and exports unless explicitly authorised.
+* All major school workflows have acceptance tests and clear failure/recovery behaviour.
+* Documentation states supported versions, install commands, environment configuration, deployment steps and recovery procedures.
+SCHOOL ERP  |  MASTER ARCHITECTURE & AI STUDIO BRIEF
+
+Working specification • Version 1.0 • 31 October 2026
+

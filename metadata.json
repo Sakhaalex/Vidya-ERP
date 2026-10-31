@@ -1,0 +1,6 @@
+{
+  "name": "Vidya - ERP",
+  "description": "Vidya - ERP: Modular school management system and reusable database-agnostic data engine.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
